@@ -1,0 +1,244 @@
+#+OPTIONS: ^:{} author:t creator:t date:t title:t toc:nil
+#+TITLE: [WIP] doc/1 et al. demo
+#+DATE: <2016-04-04 Mon>
+#+AUTHOR: Eric Bailey
+#+LANGUAGE: en
+#+CREATOR: Emacs 25.0.92.1 (Org mode 8.3.4)
+
+#+BEGIN_SRC lfe
+> (slurp "ldoc.lfe")
+#(ok ldoc)
+#+END_SRC
+
+* Success
+~doc/1~ takes an MFA tuple and pretty prints the ~#doc{}~ à la
+~#'clojure.repl/doc~.
+#+BEGIN_SRC lfe
+> (doc #(lmug response 42))
+Found: (#(lmug response 0) #(lmug response 1) #(lmug response 2))
+ok
+> (doc #(lmug response 0))
+-------------------------
+lmug:response/0
+(())
+  Convenience function; alias for ``#'lmug-response:response/0``.
+ok
+> (doc #(lmug-response response 0))
+-------------------------
+lmug-response:response/0
+(())
+  Create a default response suitable for use as an lmug handler. As this
+  function takes no arguments, it cannot be used in the middle of a
+  middleware chain, only at the beginning.
+
+  Returns a function which expects an lmug request as the only argument.
+ok
+#+END_SRC
+
+~doc/1~ calls ~doc/3~ under the hood:
+#+BEGIN_SRC lfe
+> (doc 'lmug 'response 0)
+-------------------------
+lmug:response/0
+(())
+  Convenience function; alias for ``#'lmug-response:response/0``.
+ok
+#+END_SRC
+
+* Failure
+When a module doesn't exist on the code path:
+#+BEGIN_SRC lfe
+> (doc #(not-a-mod func 42))
+#(error non-existing)
+#+END_SRC
+
+When the beam module has no =​"LDoc"​= chunk:
+#+BEGIN_SRC lfe
+> (doc #(lfe_doc no-ldoc 42))
+#(error missing-ldoc-chunk)
+#+END_SRC
+
+When a named function (with any arity) does not exist or is not exported:
+#+BEGIN_SRC lfe
+> (doc #(lmug not-a-func 42))
+#(error not-found)
+#+END_SRC
+
+* WIP
+All definitions in a module, including included record helper functions, etc:
+#+BEGIN_SRC lfe
+> (docs 'ldoc)
+#(ok
+  (#(doc macro false make-doc 255 (fds) #"" 7)
+   #(doc macro false match-doc 255 (fds) #"" 7)
+   #(doc macro false is-doc 1 ((rec)) #"" 7)
+   #(doc macro false set-doc 3 ((cons rec fds)) #"" 7)
+   #(doc macro false emp-doc 255 (fds) #"" 7)
+   #(doc macro false fields-doc 0 (()) #"" 7)
+   #(doc macro false doc-type 255 (() (rec)) #"" 7)
+   #(doc macro false set-doc-type 2 ((rec new)) #"" 7)
+   #(doc ...)
+   #(...) ...))
+#+END_SRC
+
+Only exported functions/macros in a module:
+#+BEGIN_SRC lfe
+> (exports 'ldoc)
+#(ok
+  (#(doc function true doc 1 ((`#(,mod ,func ,arity))) #"" 9)
+   #(doc function true doc 3 ((mod func arity)) #"" 13)
+   #(doc function true found 2 ((mod docs)) #"" 24)
+   #(doc function true docs 1
+     (((match-lfe_docs_v1 docs docs))
+      (mod-or-beam
+       (when
+        (orelse
+         (is_atom mod-or-beam)
+         (is_binary mod-or-beam)
+         (is_list mod-or-beam))))
+      (_))
+     #""
+     30)
+   #(doc function true module 1
+     ((beam (when (orelse (is_binary beam) (is_list beam))))
+      (mod (when (is_atom mod))))
+     #""
+     44)
+   #(doc function true pprint 2
+     ((mod (match-doc name name arity arity patterns patterns doc doc)))
+     #""
+     56)
+   #(doc function true binary->term 1 ((chunk)) #"" 67)
+   #(doc function true exports 1
+     ((docs (when (is_list docs))) ((match-lfe_docs_v1 docs docs)) (_))
+     #""
+     76)
+   #(doc function true exported? 1 (((match-doc exported 'true)) (_)) #"" 81)
+   #(doc function true source 1 ((mod)) #"" 87)
+   #(doc function true drop-prefix 2
+     ((`(,x comma xs) `(,y comma ys) (when (=:= x y))) (_ ys))
+     #""
+     98)))
+#+END_SRC
+
+* TODO Next Steps
+- Add the comma hack (~format-patterns/1~) to ~lfe_doc~
+- Clean up and document API
+- Submit a PR
+
+#+BEGIN_SRC lfe :exports none :tangle ldoc.lfe
+(defmodule ldoc
+  (doc "`\"LDoc\"` chunk utility functions.")
+  (export (doc 1) (doc 3)
+          (docs 1) (exports 1) (module 1)))
+
+(include-lib "lfe/src/lfe_doc.hrl")
+
+(defun doc
+  ([`#(,mod ,func ,arity)]
+   (doc mod func arity)))
+
+(defun doc (mod func arity)
+  (case (docs mod)
+    (`#(ok ,docs)
+     (case (lists:filter (lambda (doc) (=:= (doc-name doc) func)) docs)
+       ([]      #(error not-found))
+       (matches
+        (case (lists:keyfind arity 5 matches)
+          ('false (found mod matches))
+          (doc    (pprint mod doc))))))
+    (other other)))
+
+(defun docs
+  ([(match-lfe_docs_v1 docs docs)]
+   `#(ok ,docs))
+  ([mod-or-beam] (when (orelse (is_atom mod-or-beam)
+                               (is_binary mod-or-beam)
+                               (is_list mod-or-beam)))
+   (case (module mod-or-beam)
+     (`#(ok ,ldoc) (docs ldoc))
+     (other        other)))
+  ([_]
+   #(error badarg)))
+
+(defun exports
+  ([docs] (when (is_list docs))
+   `#(ok ,(lists:filter #'exported?/1 docs)))
+  ([(match-lfe_docs_v1 docs docs)]
+   (exports docs))
+  ([mod] (when (is_atom mod))
+   (case (docs mod)
+     (`#(ok ,docs) (exports docs))
+     (other        other)))
+  ([_]
+   #(error badarg)))
+
+(defun module
+  "Return a given `beam` module's `\"LDoc\"` chunk as a term.
+  If the chunk is missing, return `#(error #\"Missing \"LDoc\" chunk.\")`."
+  ([beam] (when (orelse (is_binary beam) (is_list beam)))
+   (case (beam_lib:chunks beam '["LDoc"] '[allow_missing_chunks])
+     (`#(ok #(,_ [#("LDoc" missing_chunk)]))
+      #(error missing-ldoc-chunk))
+     (`#(ok #(,_ [#("LDoc" ,chunk)]))
+      (binary->term chunk))
+     (`#(error beam_lib ,reason)
+      `#(error ,reason))))
+  ([mod] (when (is_atom mod))
+   (case (code:get_object_code mod)
+     ('error                 #(error non-existing))
+     (`#(,_mod ,beam ,_file) (module beam)))))
+
+(defun pprint
+  ([mod (match-doc name name arity arity patterns patterns doc doc)]
+   (let* ((format "-------------------------\n~p:~p/~p\n(~s)\n  ~s\n")
+          (patterns* (string:join (format-patterns patterns) "\n "))
+          (data   (list mod name arity patterns* doc)))
+     (lfe_io:format format data))))
+
+
+;;;===================================================================
+;;; Internal functions
+;;;===================================================================
+
+(defun binary->term (chunk)
+  (try
+    (case (binary_to_term chunk)
+      (ldoc (when (=:= (element 1 ldoc) 'lfe_docs_v1)) `#(ok ,ldoc))
+      (_other                                           #(error badarg)))
+    (catch
+      (`#(error  ,reason ,_)  `#(error ,reason))
+      (`#(,error ,reason ,_) `#(,error ,reason)))))
+
+(defun exported?
+  ([(match-doc exported 'true)] 'true)
+  ([_]                          'false))
+
+(defun found (mod docs)
+  (flet ((doc->tuple-string
+          ([(match-doc name name arity arity)]
+           `#(,mod ,name ,arity))))
+    (lfe_io:format "Found: ~p\n" `[,(lists:map #'doc->tuple-string/1 docs)])))
+
+(defun source (mod)
+  (try
+    (let* ((compile-info (call mod 'module_info 'compile))
+           (source       (proplists:get_value 'source compile-info ""))
+           (`#(ok ,cwd)  (file:get_cwd)))
+      (case (drop-prefix cwd source)
+        (abspath (when (=:= abspath source)) abspath)
+        (relpath                             (cons #\. relpath))))
+    (catch
+      (_error ""))))
+
+(defun drop-prefix
+  ([`(,x . ,xs) `(,y . ,ys)] (when (=:= x y)) (drop-prefix xs ys))
+  ([_ ys]                                      ys))
+
+(defun format-patterns (patterns)
+  (lists:map
+    (lambda (pattern)
+      (re:replace (lfe_io_pretty:term pattern) "comma " ". ,"
+                  '[global #(return list)]))
+    patterns))
+#+END_SRC
