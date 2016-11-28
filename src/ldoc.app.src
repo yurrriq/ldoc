@@ -1,0 +1,15 @@
+{application, ldoc,
+ [{description, "EDoc-compatible LFE documentation generator."},
+  {vsn, "0.0.1"},
+  {modules, [ldoc, 'ldoc-doclet', 'ldoc-extract', 'ldoc-layout', 'ldoc-util']},
+  {registered, []},
+  {applications, [kernel, stdlib, lfe]},
+  {env, []},
+
+  {maintainers, ["Eric Bailey"]},
+  {licenses, ["Apache"]},
+  {links,
+   [{"GitHub", "https://github.com/yurrriq/ldoc"},
+    {"Documentation", "https://yurrriq.github.io/ldoc"}]}
+  %% {files, ["src", "rebar.*", "README.md", "LICENSE", "resources"]}
+ ]}.
